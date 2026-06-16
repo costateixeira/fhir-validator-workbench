@@ -1,0 +1,36 @@
+# Curated FHIR IGs available to the transform workbench.
+# Each entry is loaded via the validator's /itb/igManager loadIG operation —
+# accepted forms:
+#   - "id#version"           NPM package id from packages.simplifier.net (recommended)
+#   - "id"                   latest version of the NPM package
+#   - any absolute URL to a .tgz tarball or directory containing a package
+#
+# Edit freely; the SPA refetches this file on every load.
+
+packages:
+  - id: hl7.fhir.uv.ips
+    version: "1.1.0"
+    label: "International Patient Summary (IPS) 1.1.0"
+
+  - id: hl7.fhir.uv.ipa
+    version: "1.0.0"
+    label: "International Patient Access (IPA) 1.0.0"
+
+  - id: hl7.fhir.uv.smart-app-launch
+    version: "2.2.0"
+    label: "SMART App Launch 2.2.0"
+
+  - id: hl7.fhir.be.core
+    version: "2.1.5"
+    label: "Belgian Core 2.1.5"
+
+  - id: hl7.fhir.be.allergy
+    version: "1.2.0"
+    label: "Belgian AllergyIntolerance 1.2.0"
+
+  - id: smart.who.int.icvp
+    version: "0.3.0"
+    label: "WHO SMART ICVP 0.3.0"
+
+  - id: "C:/Users/ritik/Documents/WHO/GitHub/smart-ph4h/output/package.tgz"
+    label: "smart-ph4h (local build)"

@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>FHIR Questionnaire Generator</title>
+<style>
+  :root {
+    --bg: #fdfdfd; --fg: #222; --muted: #666; --border: #ddd;
+    --accent: #1f6dbb; --accent-bg: #e7f1fc;
+    --ok: #2e7d32; --ok-bg: #ecf5ec;
+    --error: #b3261e; --error-bg: #fdecea;
+    --group-bg: #f4f7fb;
+    --req: #b15a00;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         color: var(--fg); background: var(--bg); }
+  header { padding: 12px 20px; border-bottom: 1px solid var(--border); }
+  header h1 { margin: 0; font-size: 18px; }
+  header .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  main { display: grid; grid-template-columns: 380px 1fr; min-height: calc(100vh - 60px); }
+  aside { border-right: 1px solid var(--border); padding: 16px; overflow-y: auto; }
+  section.result { padding: 16px 20px; overflow-y: auto; }
+  label { display: block; font-weight: 600; font-size: 12px; color: var(--muted);
+          text-transform: uppercase; letter-spacing: .4px; margin: 12px 0 4px; }
+  input[type=text], textarea, select {
+    width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px;
+    font: inherit; background: #fff;
+  }
+  textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  button { margin-top: 14px; padding: 8px 14px; border: 1px solid var(--accent); border-radius: 4px;
+           background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  button.secondary { background: #fff; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .hint { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .status { margin-top: 12px; font-size: 13px; padding: 8px 10px; border-radius: 4px; }
+  .status.ok { background: var(--ok-bg); color: var(--ok); }
+  .status.error { background: var(--error-bg); color: var(--error); white-space: pre-wrap; }
+  .status.busy { background: var(--accent-bg); color: var(--accent); }
+  .empty { color: var(--muted); padding: 30px; text-align: center; }
+  .q-meta { margin-bottom: 12px; }
+  .q-meta h2 { margin: 0 0 2px; font-size: 16px; }
+  .q-meta .small { color: var(--muted); font-size: 12px; }
+  .tabs { display: flex; gap: 4px; margin: 8px 0 12px; }
+  .tabs button { margin: 0; padding: 4px 12px; font-weight: 500; font-size: 12px;
+                 background: #fff; color: var(--accent); }
+  .tabs button.active { background: var(--accent); color: #fff; }
+  details.item { margin: 2px 0; }
+  details.item > summary { cursor: pointer; padding: 4px 8px; border-radius: 4px;
+                           display: flex; gap: 8px; align-items: baseline; }
+  details.item > summary:hover { background: #f0f0f0; }
+  .item.group > summary { background: var(--group-bg); font-weight: 600; }
+  .linkId { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--muted); }
+  .qtype { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: #eee; color: #444; }
+  .qtype.group { background: #dde6f0; color: #2c4c6e; }
+  .badge { font-size: 10px; padding: 1px 5px; border-radius: 8px; font-weight: 700; }
+  .badge.req { background: #fff1e0; color: var(--req); }
+  .badge.rep { background: #e9e9f5; color: #45458a; }
+  .qtext { flex: 1; }
+  .children { padding-left: 18px; border-left: 1px solid var(--border); margin-left: 8px; }
+  .answers { padding: 2px 0 4px 26px; }
+  .answer { font-size: 12px; color: #333; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre.raw { background: #f7f7f7; border: 1px solid var(--border); border-radius: 4px;
+            padding: 10px; font-size: 12px; overflow: auto; max-height: 70vh; }
+  .count { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FHIR Questionnaire Generator</h1>
+  <div class="sub">Calls the validator's <code>/itb/questionnaire</code> service (GITB) to build a Questionnaire from a StructureDefinition profile, and renders it.</div>
+</header>
+<main>
+  <aside>
+    <label for="baseUrl">Validator base URL</label>
+    <input type="text" id="baseUrl" value="http://127.0.0.1:8089" />
+    <div class="hint">The root of the running validator HTTP service.</div>
+
+    <label for="profile">Profile canonical URL</label>
+    <input type="text" id="profile" value="http://hl7.org/fhir/StructureDefinition/Patient" />
+    <div class="hint">Must be loaded in the validator's context (load its IG first if it's not base FHIR).</div>
+
+    <label for="select">Element selection — FHIRPath expressions (one per line, optional)</label>
+    <textarea id="select" rows="4" placeholder="mustSupport = true&#10;path = 'Patient.name'&#10;min &gt; 0"></textarea>
+    <div class="hint">Each is evaluated per ElementDefinition; an element is kept if ANY matches. Empty = whole profile.</div>
+
+    <div class="row">
+      <div>
+        <label for="format">Format</label>
+        <select id="format"><option value="json">json</option><option value="xml">xml</option></select>
+      </div>
+    </div>
+
+    <label style="display:flex; gap:6px; align-items:center; text-transform:none; font-weight:400; margin-top:14px;">
+      <input type="checkbox" id="fetchPackage" checked style="width:auto;" />
+      Package dependencies &amp; resolve ValueSets (recommended)
+    </label>
+    <div class="hint">The generator can't resolve terminology on its own — coded items come out bare.
+      With this on, the page also calls <code>/itb/package</code> (expandValueSets=true), then uses the
+      packaged profile's element bindings + expanded ValueSets to give every coded item real answer
+      options, inlined as <code>contained</code> resources. The result is a self-contained, offline-renderable
+      Questionnaire — the canonical use of the CRMI <code>$package</code> operation.</div>
+
+    <label for="lhcVersion">LHC-Forms version (NLM CDN) — leave blank to auto-detect</label>
+    <input type="text" id="lhcVersion" value="" placeholder="auto-detect" />
+    <div class="hint">If blank, a few common versions are probed and the first that exists is used.
+      Override only if auto-detect picks a version you don't want.
+      Browse <a href="https://clinicaltables.nlm.nih.gov/lforms-versions/" target="_blank">clinicaltables.nlm.nih.gov/lforms-versions/</a> for the full list.</div>
+
+    <button id="genBtn">Generate Questionnaire</button>
+    <button id="pasteBtn" class="secondary">Render pasted JSON…</button>
+
+    <div id="status"></div>
+
+    <div id="pasteArea" style="display:none">
+      <label for="pasteJson">Paste a Questionnaire resource</label>
+      <textarea id="pasteJson" rows="8" placeholder='{ "resourceType": "Questionnaire", ... }'></textarea>
+      <button id="renderPasteBtn">Render</button>
+    </div>
+  </aside>
+
+  <section class="result" id="result">
+    <div class="empty">Enter a profile URL and click <b>Generate Questionnaire</b>.</div>
+  </section>
+</main>
+
+<script>
+'use strict';
+
+const $ = (id) => document.getElementById(id);
+
+window.addEventListener('DOMContentLoaded', () => {
+  $('genBtn').addEventListener('click', onGenerate);
+  $('pasteBtn').addEventListener('click', () => {
+    const a = $('pasteArea');
+    a.style.display = a.style.display === 'none' ? 'block' : 'none';
+  });
+  $('renderPasteBtn').addEventListener('click', () => {
+    try {
+      const q = JSON.parse($('pasteJson').value);
+      setStatus('ok', 'Rendered pasted Questionnaire.');
+      renderQuestionnaire(q);
+    } catch (e) {
+      setStatus('error', 'Invalid JSON: ' + e.message);
+    }
+  });
+});
+
+function setStatus(kind, msg) {
+  const s = $('status');
+  s.className = 'status ' + kind;
+  s.textContent = msg;
+}
+
+function selectExpressions() {
+  const raw = $('select').value.split('\n').map(s => s.trim()).filter(Boolean);
+  return raw;
+}
+
+// ── /itb/package integration ───────────────────────────────────────────────
+// Calls the CRMI $package operation for the profile, then splices the expanded
+// ValueSets it returns into the Questionnaire as `contained` resources so the
+// LHC-Forms view can render real answer options for coded items.
+
+async function fetchPackage(base, profile) {
+  const body = { operation: 'package', input: [
+    { name: 'resource',        value: profile, embeddingMethod: 'STRING' },
+    { name: 'expandValueSets', value: 'true',  embeddingMethod: 'STRING' },
+    { name: 'targetFormat',    value: 'json',  embeddingMethod: 'STRING' },
+  ]};
+  const res = await fetch(base + '/itb/package/process', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let msg = text;
+    try { msg = JSON.parse(text).error || text; } catch (_) {}
+    throw new Error('HTTP ' + res.status + ': ' + msg);
+  }
+  const envelope = JSON.parse(text);
+  const out = (envelope.output || []).find(o => o.name === 'bundle');
+  if (!out || !out.value) throw new Error('response had no "bundle" output');
+  return JSON.parse(out.value);
+}
+
+function forEachItem(items, fn) {
+  if (!items) return;
+  for (const it of items) { fn(it); forEachItem(it.item, fn); }
+}
+
+// FHIR Questionnaire item types that take a coded answer.
+const CODED_ITEM_TYPES = new Set(['coding', 'choice', 'open-choice']);
+
+/**
+ * Make a generated Questionnaire self-contained for offline rendering, using the
+ * CRMI $package bundle.
+ *
+ * QuestionnaireBuilder.resolveValueSet() is stubbed (always null), so coded items
+ * for profile-bound elements come out bare — no answerOption, no answerValueSet.
+ * The package bundle carries both the StructureDefinition(s) — hence every
+ * element's binding.valueSet — and every ValueSet expanded. This walks the items
+ * and, for each bare coded item, looks up its element's binding in the packaged
+ * profile, finds that expanded ValueSet in the bundle, and inlines it as a
+ * `contained` resource with answerValueSet = "#<id>". Items that already carry an
+ * answerValueSet (e.g. the value[x] type-pickers) are likewise made self-contained.
+ *
+ * Returns { inlined, itemsResolved, codedItems } for status reporting.
+ */
+function enrichWithPackage(q, bundle) {
+  // index ValueSets by url and url|version
+  const vsByUrl = new Map();
+  // element path -> binding ValueSet canonical, from every StructureDefinition in the bundle
+  const bindingByPath = new Map();
+  for (const e of (bundle.entry || [])) {
+    const r = e.resource;
+    if (!r) continue;
+    if (r.resourceType === 'ValueSet' && r.url) {
+      vsByUrl.set(r.url, r);
+      if (r.version) vsByUrl.set(r.url + '|' + r.version, r);
+    } else if (r.resourceType === 'StructureDefinition') {
+      const els = (r.snapshot && r.snapshot.element) || (r.differential && r.differential.element) || [];
+      for (const el of els) {
+        if (el.path && el.binding && el.binding.valueSet && !bindingByPath.has(el.path)) {
+          bindingByPath.set(el.path, el.binding.valueSet);
+        }
+      }
+    }
+  }
+
+  if (!q.contained) q.contained = [];
+  const containedIds = new Set(q.contained.map(c => c.id));
+  const urlToContainedId = new Map();
+  let seq = 1, inlined = 0;
+
+  // Resolve a (possibly versioned) ValueSet canonical to {ref, vs} — adds the
+  // expanded ValueSet from the bundle to q.contained on first use, and returns
+  // both the "#id" reference and the ValueSet itself (so the caller can also
+  // synthesise inline answerOption[] from its expansion).
+  function inlineValueSet(ref) {
+    let vs = vsByUrl.get(ref);
+    if (!vs && ref.includes('|')) vs = vsByUrl.get(ref.split('|')[0]);
+    if (!vs) {
+      for (const [k, v] of vsByUrl) {
+        if (k === ref || k.startsWith(ref + '|')) { vs = v; break; }
+      }
+    }
+    if (!vs) return null; // not in the package
+    const key = vs.url || ref;
+    let cid = urlToContainedId.get(key);
+    if (!cid) {
+      cid = vs.id || ('vs-' + (seq++));
+      while (containedIds.has(cid)) cid = 'vs-' + (seq++);
+      const copy = JSON.parse(JSON.stringify(vs));
+      copy.id = cid;
+      q.contained.push(copy);
+      containedIds.add(cid);
+      urlToContainedId.set(key, cid);
+      inlined++;
+    }
+    return { containedRef: '#' + cid, valueSet: vs };
+  }
+
+  // Flatten a ValueSet expansion's tree into inline Questionnaire answerOption[] —
+  // the most-compatible representation across LHC-Forms versions, and survives
+  // independently of the contained-ValueSet round-trip.
+  function answerOptionsFromExpansion(vs) {
+    const out = [];
+    const seen = new Set();
+    function walk(contains) {
+      for (const c of (contains || [])) {
+        if (c.code && !c.abstract) {
+          const key = (c.system || '') + '|' + c.code;
+          if (!seen.has(key)) {
+            seen.add(key);
+            const coding = { code: c.code };
+            if (c.system)  coding.system = c.system;
+            if (c.version) coding.version = c.version;
+            if (c.display) coding.display = c.display;
+            out.push({ valueCoding: coding });
+          }
+        }
+        if (c.contains) walk(c.contains);
+      }
+    }
+    if (vs.expansion) walk(vs.expansion.contains);
+    return out;
+  }
+
+  // a coded item's linkId is "<elementPath>.<suffix>" (value/coding/system/...).
+  // strip trailing segments until one matches a known binding path.
+  function bindingFor(linkId) {
+    if (!linkId) return null;
+    let p = linkId;
+    while (true) {
+      if (bindingByPath.has(p)) return bindingByPath.get(p);
+      const dot = p.lastIndexOf('.');
+      if (dot < 0) return null;
+      p = p.substring(0, dot);
+    }
+  }
+
+  // Apply a resolved {ref, vs} to an item: keep the contained reference AND write
+  // inline answerOption[] (most-compatible LHC-Forms representation). Idempotent —
+  // doesn't clobber existing answerOption if present.
+  function applyResolved(item, resolved) {
+    item.answerValueSet = resolved.containedRef;
+    if (!item.answerOption || !item.answerOption.length) {
+      const opts = answerOptionsFromExpansion(resolved.valueSet);
+      if (opts.length) item.answerOption = opts;
+    }
+  }
+
+  let codedItems = 0, itemsResolved = 0;
+  forEachItem(q.item, (item) => {
+    if (!CODED_ITEM_TYPES.has(item.type)) return;
+    codedItems++;
+
+    // already has inline options — done
+    if (item.answerOption && item.answerOption.length) { itemsResolved++; return; }
+
+    // already self-contained — try to also synthesise inline answerOption from the
+    // bundle so the form renders even on LHC-Forms versions that don't follow
+    // contained refs.
+    if (item.answerValueSet && item.answerValueSet.startsWith('#')) {
+      const cid = item.answerValueSet.substring(1);
+      const c = (q.contained || []).find(x => x.id === cid);
+      if (c && c.resourceType === 'ValueSet') {
+        const opts = answerOptionsFromExpansion(c);
+        if (opts.length) item.answerOption = opts;
+      }
+      itemsResolved++;
+      return;
+    }
+
+    // carries an external answerValueSet — make it self-contained from the package
+    if (item.answerValueSet) {
+      const r = inlineValueSet(item.answerValueSet);
+      if (r) { applyResolved(item, r); itemsResolved++; }
+      return;
+    }
+
+    // bare coded item — resolve via the packaged profile's element binding
+    const vsUrl = bindingFor(item.linkId);
+    if (vsUrl) {
+      const r = inlineValueSet(vsUrl);
+      if (r) { applyResolved(item, r); itemsResolved++; }
+    }
+  });
+
+  if (q.contained.length === 0) delete q.contained;
+  return { inlined, itemsResolved, codedItems };
+}
+
+async function onGenerate() {
+  const base = $('baseUrl').value.replace(/\/+$/, '');
+  const profile = $('profile').value.trim();
+  const format = $('format').value;
+  if (!profile) { setStatus('error', 'Enter a profile canonical URL.'); return; }
+
+  const input = [
+    { name: 'profile', value: profile, embeddingMethod: 'STRING' },
+    { name: 'targetFormat', value: format, embeddingMethod: 'STRING' },
+  ];
+  const exprs = selectExpressions();
+  if (exprs.length) {
+    input.push({ name: 'select', value: JSON.stringify(exprs), embeddingMethod: 'STRING' });
+  }
+  const body = { operation: 'generate', input };
+
+  $('genBtn').disabled = true;
+  setStatus('busy', 'Calling ' + base + '/itb/questionnaire/process …');
+  try {
+    const res = await fetch(base + '/itb/questionnaire/process', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      let msg = text;
+      try { msg = JSON.parse(text).error || text; } catch (_) {}
+      setStatus('error', 'HTTP ' + res.status + ': ' + msg);
+      return;
+    }
+    const envelope = JSON.parse(text);
+    const out = (envelope.output || []).find(o => o.name === 'questionnaire');
+    if (!out || !out.value) {
+      setStatus('error', 'Response had no "questionnaire" output:\n' + text.slice(0, 500));
+      return;
+    }
+    if (format === 'xml') {
+      setStatus('ok', 'Generated (XML) — showing raw, no tree view for XML.');
+      $('result').innerHTML = '';
+      const pre = document.createElement('pre');
+      pre.className = 'raw';
+      pre.textContent = out.value;
+      $('result').appendChild(pre);
+      return;
+    }
+    const q = JSON.parse(out.value);
+    let packageBundle = null;
+    if ($('fetchPackage').checked) {
+      try {
+        setStatus('busy', 'Packaging dependencies for ' + profile + ' via /itb/package …');
+        packageBundle = await fetchPackage(base, profile);
+        const r = enrichWithPackage(q, packageBundle);
+        setStatus('ok', 'Generated Questionnaire — ' + countItems(q.item) + ' items. '
+          + 'Packaged ' + ((packageBundle.entry || []).length) + ' dependencies; '
+          + 'inlined ' + r.inlined + ' ValueSet' + (r.inlined === 1 ? '' : 's') + '; '
+          + r.itemsResolved + ' of ' + r.codedItems + ' coded items now have answer options.');
+      } catch (pe) {
+        setStatus('ok', 'Generated Questionnaire — ' + countItems(q.item) + ' items. '
+          + '(Package fetch failed: ' + pe.message + ' — coded items will render without options.)');
+      }
+    } else {
+      setStatus('ok', 'Generated Questionnaire — ' + countItems(q.item) + ' items. '
+        + '(Package fetch off — coded items have no answer options; QuestionnaireBuilder cannot resolve ValueSets on its own.)');
+    }
+    renderQuestionnaire(q, packageBundle);
+  } catch (e) {
+    setStatus('error', 'Request failed: ' + e.message +
+      '\n\nIf the page is opened as a file://, the browser may block cross-origin calls. ' +
+      'Serve this file from the same origin as the validator, or use "Render pasted JSON".');
+  } finally {
+    $('genBtn').disabled = false;
+  }
+}
+
+function countItems(items) {
+  if (!items) return 0;
+  let n = 0;
+  for (const it of items) { n += 1 + countItems(it.item); }
+  return n;
+}
+
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v;
+    else if (k === 'text') e.textContent = v;
+    else if (v != null) e.setAttribute(k, v);
+  }
+  for (const c of kids) {
+    if (c == null) continue;
+    e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  }
+  return e;
+}
+
+let lastQuestionnaire = null;
+let lastPackage = null;
+
+function renderQuestionnaire(q, packageBundle) {
+  lastQuestionnaire = q;
+  lastPackage = packageBundle || null;
+  const root = $('result');
+  root.innerHTML = '';
+
+  if (!q || q.resourceType !== 'Questionnaire') {
+    root.appendChild(el('div', { class: 'status error' },
+      'Not a Questionnaire resource (resourceType = ' + (q && q.resourceType) + ').'));
+    return;
+  }
+
+  // metadata
+  const meta = el('div', { class: 'q-meta' });
+  meta.appendChild(el('h2', { text: q.title || q.name || q.url || '(untitled Questionnaire)' }));
+  const bits = [];
+  if (q.url) bits.push(q.url);
+  if (q.status) bits.push('status: ' + q.status);
+  if (q.date) bits.push(q.date);
+  meta.appendChild(el('div', { class: 'small', text: bits.join('  ·  ') }));
+  root.appendChild(meta);
+
+  // tabs: tree | form (NLM LHC-Forms) | [dependencies] | raw
+  const tabs = el('div', { class: 'tabs' });
+  const treeBtn = el('button', { class: 'active', text: 'Tree' });
+  const formBtn = el('button', { text: 'Form (LHC-Forms)' });
+  const depsBtn = packageBundle ? el('button', { text: 'Dependencies (' + ((packageBundle.entry || []).length) + ')' }) : null;
+  const rawBtn  = el('button', { text: 'Raw JSON' });
+  tabs.appendChild(treeBtn);
+  tabs.appendChild(formBtn);
+  if (depsBtn) tabs.appendChild(depsBtn);
+  tabs.appendChild(rawBtn);
+  root.appendChild(tabs);
+
+  const treeView = el('div');
+  const formView = el('div');
+  const depsView = packageBundle ? el('div') : null;
+  const rawView  = el('pre', { class: 'raw' });
+  rawView.textContent = JSON.stringify(q, null, 2);
+  formView.style.display = 'none';
+  if (depsView) depsView.style.display = 'none';
+  rawView.style.display = 'none';
+  root.appendChild(treeView);
+  root.appendChild(formView);
+  if (depsView) root.appendChild(depsView);
+  root.appendChild(rawView);
+
+  const views = [
+    [treeBtn, treeView],
+    [formBtn, formView],
+    [rawBtn,  rawView],
+  ];
+  if (depsBtn) views.push([depsBtn, depsView]);
+  function activate(btn, view) {
+    for (const [b, v] of views) {
+      b.classList.toggle('active', b === btn);
+      v.style.display = v === view ? '' : 'none';
+    }
+  }
+  treeBtn.addEventListener('click', () => activate(treeBtn, treeView));
+  rawBtn.addEventListener('click',  () => activate(rawBtn,  rawView));
+  formBtn.addEventListener('click', () => {
+    activate(formBtn, formView);
+    renderLhcForm(q, formView); // lazy — loads LHC-Forms from the NLM CDN on first use
+  });
+  if (depsBtn) {
+    depsBtn.addEventListener('click', () => activate(depsBtn, depsView));
+    renderDependencies(packageBundle, depsView);
+  }
+
+  if (!q.item || !q.item.length) {
+    treeView.appendChild(el('div', { class: 'empty', text: 'Questionnaire has no items.' }));
+    return;
+  }
+  treeView.appendChild(el('div', { class: 'count', text: countItems(q.item) + ' items total' }));
+  for (const it of q.item) treeView.appendChild(renderItem(it, 0));
+}
+
+/** Render the /itb/package result as a grouped list of dependency resources. */
+function renderDependencies(bundle, container) {
+  container.innerHTML = '';
+  const entries = bundle.entry || [];
+  container.appendChild(el('div', { class: 'count',
+    text: entries.length + ' resource' + (entries.length === 1 ? '' : 's') + ' in the dependency package' }));
+
+  const byType = new Map();
+  for (const e of entries) {
+    const r = e.resource || {};
+    const t = r.resourceType || '(unknown)';
+    if (!byType.has(t)) byType.set(t, []);
+    byType.get(t).push(r);
+  }
+  for (const t of [...byType.keys()].sort()) {
+    const list = byType.get(t);
+    const det = el('details', { class: 'item group' });
+    det.setAttribute('open', '');
+    det.appendChild(el('summary', null,
+      el('span', { class: 'qtype group', text: t }),
+      el('span', { class: 'qtext', text: list.length + ' ' + (list.length === 1 ? 'resource' : 'resources') })));
+    const kids = el('div', { class: 'children' });
+    for (const r of list) {
+      const label = r.url || (r.resourceType + '/' + (r.id || '?'));
+      const ver = r.version ? ' (' + r.version + ')' : '';
+      let extra = '';
+      if (r.resourceType === 'ValueSet' && r.expansion) {
+        extra = '  — expansion: ' + ((r.expansion.contains || []).length) + ' concepts';
+      }
+      kids.appendChild(el('div', { class: 'answer', text: '• ' + label + ver + extra }));
+    }
+    det.appendChild(kids);
+    container.appendChild(det);
+  }
+}
+
+// ── NLM LHC-Forms (lhcforms.nlm.nih.gov) integration ───────────────────────
+// Renders the FHIR Questionnaire as an interactive form. Loaded lazily from the
+// NLM CDN the first time the "Form" tab is opened, so the rest of the page works
+// offline. The version comes from the input — empty means auto-detect: probe
+// each candidate's zone.min.js with a HEAD request and use the first that 200s.
+const LHC_FORMS_CANDIDATE_VERSIONS = [
+  // tried in order; first probe that 200s wins. Update as new versions land.
+  '34.2.0', '33.5.2', '33.5.1', '33.4.0', '33.3.0', '32.0.0', '31.0.0', '30.0.0',
+  '35.0.0', '36.0.0', '36.3.0',
+];
+let lhcFormsLoading = null;        // Promise, set on first load attempt
+let lhcFormsLoadedFor = null;      // the version string the user requested when load started
+let lhcFhirVersion = null;         // 'R5' | 'R4' | 'STU3' | 'all' — the FHIR support that loaded
+
+function lhcVersion() {
+  const v = ($('lhcVersion').value || '').trim();
+  return v; // "" means auto-detect
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('failed to load ' + src));
+    document.head.appendChild(s);
+  });
+}
+
+function loadCss(href) {
+  const l = document.createElement('link');
+  l.rel = 'stylesheet';
+  l.href = href;
+  document.head.appendChild(l);
+}
+
+function nlmBase(version) {
+  return 'https://clinicaltables.nlm.nih.gov/lforms-versions/' + version;
+}
+
+async function ensureLhcForms() {
+  const requested = lhcVersion();
+  if (lhcFormsLoading && lhcFormsLoadedFor === requested) return lhcFormsLoading;
+  lhcFormsLoadedFor = requested;
+  lhcFormsLoading = (async () => {
+    // Find a working version by trying to load zone.min.js for each candidate.
+    // A successful script-tag load doubles as a probe AND the actual bundle load
+    // (no need to re-fetch). Failed loads leave a stray <script> in the head but
+    // don't execute, so there are no side effects from version mismatches.
+    const candidates = requested
+      ? [requested, ...LHC_FORMS_CANDIDATE_VERSIONS.filter(v => v !== requested)]
+      : LHC_FORMS_CANDIDATE_VERSIONS.slice();
+    let version = null;
+    const tried = [];
+    for (const v of candidates) {
+      tried.push(v);
+      try {
+        await loadScript(nlmBase(v) + '/webcomponent/assets/lib/zone.min.js');
+        version = v;
+        break;
+      } catch (_) { /* try next */ }
+    }
+    if (!version) {
+      throw new Error('No LHC-Forms version reachable on the NLM CDN. Tried: ' + tried.join(', '));
+    }
+    // Reflect the auto-picked version back to the input so the user sees what worked.
+    const inp = $('lhcVersion'); if (inp && inp.value.trim() === '') inp.value = version;
+    const base = nlmBase(version);
+    loadCss(base + '/webcomponent/styles.css');
+    await loadScript(base + '/webcomponent/lhc-forms.js');
+
+    // FHIR support file: older LHC-Forms used per-version dirs (/fhir/R4/, /fhir/STU3/);
+    // newer ones have a single /fhir/lformsFHIR.min.js. Try a few in order; remember
+    // which one loaded so we can normalise the Questionnaire shape for it.
+    const fhirSupportPaths = [
+      ['R5',   '/fhir/R5/lformsFHIR.min.js'],
+      ['all',  '/fhir/lformsFHIR.min.js'],
+      ['R4',   '/fhir/R4/lformsFHIR.min.js'],
+      ['STU3', '/fhir/STU3/lformsFHIR.min.js'],
+    ];
+    let fhirLoaded = false;
+    const fhirTried = [];
+    for (const [fhirVer, p] of fhirSupportPaths) {
+      fhirTried.push(p);
+      try { await loadScript(base + p); fhirLoaded = true; lhcFhirVersion = fhirVer; break; }
+      catch (_) { /* try next */ }
+    }
+    if (!fhirLoaded) {
+      throw new Error('LForms ' + version + ' loaded, but no FHIR support file found at any of: ' + fhirTried.join(', '));
+    }
+    if (!window.LForms || !LForms.Util) {
+      throw new Error('LForms ' + version + ' loaded but window.LForms.Util is missing');
+    }
+  })().catch((e) => { lhcFormsLoading = null; throw e; });
+  return lhcFormsLoading;
+}
+
+/**
+ * Adapt the generated Questionnaire for LHC-Forms rendering:
+ *
+ *   (1) When LHC-Forms is in R4 mode, rename R5 `type: "coding"` to R4
+ *       `"choice"` / `"open-choice"` (based on `answerConstraint`) and drop the
+ *       R5-only `answerConstraint` field — otherwise LHC-Forms treats it as
+ *       unknown and falls back to a free-text input.
+ *
+ *   (2) Collapse single-leaf group wrappers — QuestionnaireBuilder wraps every
+ *       leaf element in a 1-item group whose text is the element's `short`, so
+ *       LHC-Forms ends up rendering each question on two rows (a "header"
+ *       group and the input below). Lifting the leaf and keeping the more
+ *       informative text drops it to one row per question.
+ */
+function questionnaireForLhc(q) {
+  const copy = JSON.parse(JSON.stringify(q));
+  const r4ish = lhcFhirVersion === 'R4' || lhcFhirVersion === 'STU3';
+  forEachItem(copy.item, (item) => {
+    if (r4ish && item.type === 'coding') {
+      item.type = (item.answerConstraint === 'optionsOrString' || item.answerConstraint === 'optionsOrType')
+        ? 'open-choice'
+        : 'choice';
+    }
+    delete item.answerConstraint; // R5-only — drop in all modes for safety
+  });
+  copy.item = flattenSingleLeafGroups(copy.item);
+  return copy;
+}
+
+/**
+ * Walk the item tree and collapse every group that has exactly one non-display
+ * leaf child (plus any number of help/display siblings) into that child. The
+ * displays travel with the leaf so help icons stay attached to their question.
+ * Recursive — applied bottom-up.
+ */
+function flattenSingleLeafGroups(items) {
+  if (!items) return items;
+  const out = [];
+  for (const item of items) {
+    if (item.item) item.item = flattenSingleLeafGroups(item.item);
+    if (item.type === 'group' && item.item && item.item.length >= 1) {
+      const nonDisplay = item.item.filter(c => c.type !== 'display');
+      const displays   = item.item.filter(c => c.type === 'display');
+      if (nonDisplay.length === 1) {
+        const child = nonDisplay[0];
+        const childIsLeaf = child.type && child.type !== 'group';
+        if (childIsLeaf) {
+          // Prefer the wrapper's text when the child has none, or when it's the
+          // generic value/coding/code suffix the builder uses for leaf questions.
+          const childTextIsGeneric = !child.text
+            || ['value', 'coding', 'code', 'use', 'system', 'units', 'comparator'].includes(String(child.text).toLowerCase());
+          if (item.text && childTextIsGeneric) child.text = item.text;
+          // Inherit required/repeats from the wrapper if the child didn't set them
+          if (item.required && child.required == null) child.required = item.required;
+          if (item.repeats  && child.repeats  == null) child.repeats  = item.repeats;
+          // Carry the wrapper's flyover/help displays down with the leaf so the
+          // tooltip icon stays attached to the visible question instead of an
+          // empty bar above it.
+          if (displays.length) child.item = (child.item || []).concat(displays);
+          out.push(child);
+          continue;
+        }
+      }
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+async function renderLhcForm(q, container) {
+  if (container.dataset.rendered === 'true') return; // render once
+  container.innerHTML = '';
+  const v = lhcVersion();
+  container.appendChild(el('div', { class: 'status busy',
+    text: v ? ('Loading NLM LHC-Forms ' + v + ' from the CDN…')
+            : 'Auto-detecting an NLM LHC-Forms version that exists…' }));
+  try {
+    await ensureLhcForms();
+    q = questionnaireForLhc(q); // adapt R5 → R4 if LHC-Forms is in R4 mode
+    container.innerHTML = '';
+    const host = el('div', { id: 'lhc-form-host' });
+    container.appendChild(host);
+    // addFormToPage accepts a FHIR Questionnaire directly once lformsFHIR is loaded;
+    // fall back to explicit conversion (R5 first — generateQuestionnaire emits R5 —
+    // then R4) if the direct call doesn't take.
+    try {
+      LForms.Util.addFormToPage(q, host, {});
+    } catch (direct) {
+      let lformsDef = null, lastErr = direct;
+      for (const ver of ['R5', 'R4']) {
+        try {
+          lformsDef = LForms.Util.convertFHIRQuestionnaireToLForms(q, ver);
+          break;
+        } catch (e) { lastErr = e; }
+      }
+      if (!lformsDef) throw lastErr;
+      LForms.Util.addFormToPage(lformsDef, host, {});
+    }
+    container.dataset.rendered = 'true';
+  } catch (e) {
+    container.innerHTML = '';
+    const cur = lhcVersion();
+    container.appendChild(el('div', { class: 'status error',
+      text: 'Could not render with NLM LHC-Forms: ' + e.message +
+        '\n\nThe Tree, Dependencies, and Raw JSON tabs still work. ' +
+        'Browse https://clinicaltables.nlm.nih.gov/lforms-versions/ for the version list, ' +
+        'put one in the "LHC-Forms version" field' +
+        (cur ? ' (currently ' + cur + ')' : ' (currently auto-detect)') +
+        ', and click the Form tab again.' }));
+  }
+}
+
+function renderItem(item, depth) {
+  const isGroup = item.type === 'group' || item.type === 'display';
+  const details = el('details', { class: 'item ' + (isGroup ? 'group' : '') });
+  if (depth < 2) details.setAttribute('open', '');
+
+  const summary = el('summary');
+  summary.appendChild(el('span', { class: 'qtype ' + (isGroup ? 'group' : ''), text: item.type || '?' }));
+  summary.appendChild(el('span', { class: 'qtext', text: item.text || '(no text)' }));
+  if (item.required) summary.appendChild(el('span', { class: 'badge req', text: 'required' }));
+  if (item.repeats)  summary.appendChild(el('span', { class: 'badge rep', text: 'repeats' }));
+  summary.appendChild(el('span', { class: 'linkId', text: item.linkId || '' }));
+  details.appendChild(summary);
+
+  // answer options (coded answers)
+  if (item.answerOption && item.answerOption.length) {
+    const ans = el('div', { class: 'answers' });
+    for (const opt of item.answerOption) {
+      ans.appendChild(el('div', { class: 'answer', text: '• ' + describeAnswerOption(opt) }));
+    }
+    details.appendChild(ans);
+  }
+  if (item.answerValueSet) {
+    details.appendChild(el('div', { class: 'answers' },
+      el('div', { class: 'answer', text: '↳ answerValueSet: ' + item.answerValueSet })));
+  }
+
+  if (item.item && item.item.length) {
+    const kids = el('div', { class: 'children' });
+    for (const sub of item.item) kids.appendChild(renderItem(sub, depth + 1));
+    details.appendChild(kids);
+  }
+  return details;
+}
+
+function describeAnswerOption(opt) {
+  if (opt.valueCoding) {
+    const c = opt.valueCoding;
+    return (c.system ? c.system + '#' : '') + (c.code || '') + (c.display ? ' "' + c.display + '"' : '');
+  }
+  if (opt.valueString != null)   return JSON.stringify(opt.valueString);
+  if (opt.valueInteger != null)  return String(opt.valueInteger);
+  if (opt.valueDate != null)     return opt.valueDate;
+  if (opt.valueReference)        return 'Reference(' + (opt.valueReference.reference || '') + ')';
+  return JSON.stringify(opt);
+}
+</script>
+</body>
+</html>

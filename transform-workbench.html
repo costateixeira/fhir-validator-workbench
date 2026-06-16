@@ -1,0 +1,725 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>FHIR Transform Workbench</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --fg: #1a1f2c; --muted: #5b6473; --line: #d8dde5;
+    --accent: #0b73c4; --accent-fg: white;
+    --ok: #1f8a3a; --err: #b91c1c; --warn: #b15a00;
+    --panel: white;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
+         background: var(--bg); color: var(--fg); }
+  header { padding: 16px 20px; background: white; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0 0 4px 0; font-size: 18px; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  main { padding: 16px 20px; max-width: 1200px; margin: 0 auto; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+            padding: 14px 16px; margin-bottom: 14px; }
+  section h2 { font-size: 14px; margin: 0 0 10px 0; padding-bottom: 8px;
+               border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+  section h2 .step { background: var(--accent); color: var(--accent-fg);
+                     border-radius: 50%; width: 22px; height: 22px;
+                     display: inline-flex; align-items: center; justify-content: center;
+                     font-size: 12px; font-weight: 600; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 4px 0 2px; }
+  input[type=text], input[type=url], select, textarea {
+    width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line);
+    border-radius: 4px; background: white;
+  }
+  textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid var(--line);
+           background: white; border-radius: 4px; cursor: pointer; }
+  button:hover { background: #eef3f7; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  button.primary:hover { background: #095a99; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .row { display: flex; gap: 8px; align-items: end; }
+  .row > * { flex: 1; }
+  .row > button { flex: 0 0 auto; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .status { margin-top: 8px; padding: 8px 10px; border-radius: 4px; font-size: 12px;
+            white-space: pre-wrap; word-break: break-word; }
+  .status.ok   { background: #e9f5ed; color: var(--ok);   border: 1px solid #b4e0c1; }
+  .status.err  { background: #fdecec; color: var(--err);  border: 1px solid #f1c0c0; }
+  .status.warn { background: #fbf2e2; color: var(--warn); border: 1px solid #ecd6a8; }
+  .status.idle { background: #f1f3f7; color: var(--muted); border: 1px solid var(--line); }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px;
+          background: #eef3f7; color: var(--muted); font-size: 11px; margin-left: 6px; }
+  .pill.ok  { background: #e9f5ed; color: var(--ok); }
+  .pill.err { background: #fdecec; color: var(--err); }
+  details { margin-top: 8px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  details pre { background: #0e1116; color: #e6edf3; padding: 10px;
+                border-radius: 4px; overflow: auto; max-height: 280px; font-size: 12px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .help { color: var(--muted); font-size: 12px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FHIR Transform Workbench</h1>
+  <div class="sub">
+    Bootstraps the FHIR validator, loads an IG, parses an FML map, registers it on the server,
+    then transforms a JSON resource against the map.
+  </div>
+</header>
+<main>
+
+<section id="setup">
+  <h2><span class="step">0</span> Setup <span id="proxyPill" class="pill">cors-proxy unknown</span></h2>
+  <div class="row">
+    <div>
+      <label>Validator base URL (typically the cors-proxy)</label>
+      <input id="baseUrl" type="url" value="http://127.0.0.1:8090" />
+    </div>
+    <button id="checkValidator">Check</button>
+    <button id="startValidator">Start</button>
+    <button id="restartValidator" title="Stops the validator and starts a fresh one — clears all loaded IGs/resources from context">Restart (clear context)</button>
+  </div>
+  <div id="validatorStatus" class="status idle">Click <b>Check</b> to probe the validator.</div>
+
+  <details id="logPanel" style="margin-top:6px;">
+    <summary>Validator log (tail when expanded)</summary>
+    <div class="row" style="margin-top:6px;">
+      <select id="logFile" style="max-width:280px; flex:0 0 auto;">
+        <option value="validator.out.log">stdout (validator.out.log)</option>
+        <option value="validator.err.log">stderr (validator.err.log)</option>
+      </select>
+      <button id="clearLog">Clear</button>
+      <span id="logState" class="pill" style="align-self:center;">idle</span>
+    </div>
+    <pre id="logView" style="background:#0e1116; color:#e6edf3; padding:10px; border-radius:4px; overflow:auto; max-height:280px; font-size:12px; margin-top:6px; white-space:pre-wrap; word-break:break-word;"></pre>
+  </details>
+
+  <div class="row" style="margin-top:12px">
+    <div>
+      <label>validator_cli.jar download URL</label>
+      <input id="jarUrl" type="url"
+        value="https://github.com/costateixeira/org.hl7.fhir.core/releases/download/wip/validator_cli.jar" />
+    </div>
+    <button id="checkJar">Check</button>
+    <button id="downloadJar" class="primary">Download to ./</button>
+  </div>
+  <div id="jarStatus" class="status idle">Click <b>Check</b> to see whether validator_cli.jar is present locally.</div>
+  <div class="help">Once the jar is present, <b>Start</b> launches the validator via the cors-proxy (no terminal needed). <b>Restart</b> kills it and starts a fresh one — the only reliable way to drop a map/IG already in context so an edited version takes effect. Equivalent manual command:<br />
+    <code class="mono">java -jar validator_cli.jar server 8089 -version 4.0</code>
+  </div>
+</section>
+
+<section id="step1">
+  <h2><span class="step">1</span> Load IG</h2>
+  <div class="row">
+    <div>
+      <label>Package (from packages.yaml)</label>
+      <select id="igSelect"><option>(loading packages.yaml…)</option></select>
+    </div>
+    <button id="loadIg" class="primary" disabled>Load IG</button>
+  </div>
+  <div id="igStatus" class="status idle">Pick a package and click <b>Load IG</b>.</div>
+</section>
+
+<section id="step2">
+  <h2><span class="step">2</span> Select &amp; parse FML</h2>
+  <div class="row">
+    <div>
+      <label>Map (from maps.yaml)</label>
+      <select id="mapSelect"><option>(loading maps.yaml…)</option></select>
+    </div>
+    <button id="fetchFml">Fetch FML</button>
+    <button id="parseFml" class="primary" disabled>Parse → StructureMap</button>
+  </div>
+  <div id="fmlStatus" class="status idle">Pick a map and click <b>Fetch FML</b>.</div>
+  <div class="grid2" style="margin-top:10px">
+    <div>
+      <label>FML source</label>
+      <textarea id="fmlText" rows="14" placeholder="(FML text will appear here, or paste your own)"></textarea>
+    </div>
+    <div>
+      <label>Parsed StructureMap <span id="smUrlPill" class="pill">no map parsed</span></label>
+      <textarea id="smJson" rows="14" readonly placeholder="(JSON StructureMap will appear here)"></textarea>
+    </div>
+  </div>
+</section>
+
+<section id="step3">
+  <h2><span class="step">3</span> Register on the validator</h2>
+  <div>
+    <label>Strategy</label>
+    <label class="mono" style="display:inline-block; color: var(--fg); font-size: 13px;">
+      <input type="radio" name="regMode" value="direct" checked /> Load this StructureMap directly (POST /itb/loadResource)
+    </label>
+    <label class="mono" style="display:inline-block; margin-left: 16px; color: var(--fg); font-size: 13px;">
+      <input type="radio" name="regMode" value="package" /> $package the SM &amp; its deps, then load the Bundle
+    </label>
+  </div>
+  <div style="margin-top:6px; font-size: 12px; color: var(--fg);">
+    <label style="display:inline-block;">
+      <input type="checkbox" id="includeRuleRefs" /> walk ConceptMap references inside FML rules (translate)
+    </label>
+    <span class="help" style="display:inline; margin-left: 8px;">applies to the $package strategy only</span>
+  </div>
+  <div id="sdBox" style="margin-top:10px; font-size:12px;">
+    <div class="row" style="align-items:center;">
+      <button id="detectSds" disabled>Detect StructureDefinitions</button>
+      <button id="resolveSds" disabled>Fetch missing by URL</button>
+      <span class="help" style="display:inline; margin-left: 8px;">StructureDefinitions the map's <code class="mono">uses</code> declarations reference. Fetched ones are loaded into context and (in $package mode) ride along as dependencies.</span>
+    </div>
+    <ul id="sdList" style="list-style:none; padding-left:0; margin:8px 0 0;"></ul>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="registerSm" class="primary" disabled>Register</button>
+  </div>
+  <div id="regStatus" class="status idle">Parse a map first.</div>
+  <details><summary>Last load response</summary><pre id="regDump">(none)</pre></details>
+</section>
+
+<section id="step4">
+  <h2><span class="step">4</span> Transform</h2>
+  <div class="row">
+    <div>
+      <label>Input source</label>
+      <select id="sampleSelect">
+        <option value="__editor__">— Use editor below —</option>
+      </select>
+    </div>
+    <button id="fetchSample">Fetch sample</button>
+  </div>
+  <div class="grid2" style="margin-top:10px">
+    <div>
+      <label>Input JSON</label>
+      <textarea id="inputJson" rows="16" placeholder='{"resourceType":"Patient","id":"…"}'></textarea>
+    </div>
+    <div>
+      <label>Output</label>
+      <textarea id="outputJson" rows="16" readonly placeholder="(transformed resource will appear here)"></textarea>
+    </div>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <div>
+      <label>Map URL (auto-filled from step 2; you can override)</label>
+      <input id="mapUrl" type="url" placeholder="http://example.org/StructureMap/…" />
+    </div>
+    <button id="runTransform" class="primary" disabled>Transform</button>
+  </div>
+  <div id="transformStatus" class="status idle">Provide input + a map URL, then click <b>Transform</b>.</div>
+</section>
+
+</main>
+
+<script>
+// ---- Tiny helpers ---------------------------------------------------------
+
+const $  = (id) => document.getElementById(id);
+const baseUrl = () => $('baseUrl').value.replace(/\/+$/, '');
+
+function setStatus(elId, kind, text) {
+  const el = $(elId);
+  el.className = 'status ' + kind;
+  el.textContent = text;
+}
+
+function setPill(elId, kind, text) {
+  const el = $(elId);
+  el.className = 'pill' + (kind ? (' ' + kind) : '');
+  el.textContent = text;
+}
+
+async function jsonFetch(url, opts) {
+  const r = await fetch(url, opts || {});
+  const ct = r.headers.get('Content-Type') || '';
+  const text = await r.text();
+  let body;
+  try { body = ct.includes('json') ? JSON.parse(text) : text; }
+  catch (_) { body = text; }
+  if (!r.ok) {
+    const msg = typeof body === 'string' ? body : (body.error || JSON.stringify(body));
+    throw new Error('HTTP ' + r.status + ' from ' + url + ': ' + msg);
+  }
+  return body;
+}
+
+// GITB processing-service helper: build a "process" call envelope and dig out the named output.
+function gitbInput(name, value, mime) {
+  return { name: name, value: value || '', embeddingMethod: 'STRING' };
+}
+async function gitbProcess(svc, operation, inputs) {
+  const body = JSON.stringify({ operation: operation, input: inputs });
+  const r = await jsonFetch(baseUrl() + '/itb/' + svc + '/process', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body
+  });
+  return r;
+}
+function gitbOutput(resp, name) {
+  if (!resp || !resp.output) return null;
+  const entry = resp.output.find((e) => e.name === name);
+  return entry ? entry.value : null;
+}
+
+function viaProxyFetch(url) {
+  return baseUrl() + '/__local/fetch?url=' + encodeURIComponent(url);
+}
+
+// ---- State ---------------------------------------------------------------
+
+const state = {
+  packages: [], maps: [], samples: [],
+  smJson: null, smUrl: null,
+  structures: []   // [{ url, status, statusText, json }] — SDs the parsed map `uses`
+};
+
+// ---- packages.yaml / maps.yaml -------------------------------------------
+
+async function loadYaml(name) {
+  // Try /__local/file via cors-proxy first; fall back to relative fetch.
+  const tryUrls = [baseUrl() + '/__local/file?name=' + encodeURIComponent(name), name];
+  for (const u of tryUrls) {
+    try {
+      const r = await fetch(u);
+      if (r.ok) return jsyaml.load(await r.text());
+    } catch (_) { /* try next */ }
+  }
+  throw new Error('Could not load ' + name + ' from ' + tryUrls.join(' or '));
+}
+
+async function initConfig() {
+  try {
+    const pkg = await loadYaml('packages.yaml');
+    state.packages = (pkg && pkg.packages) || [];
+    const sel = $('igSelect'); sel.innerHTML = '';
+    if (!state.packages.length) sel.innerHTML = '<option>(empty)</option>';
+    else for (const p of state.packages) {
+      const opt = document.createElement('option');
+      opt.value = p.id + (p.version ? '#' + p.version : '');
+      opt.textContent = p.label || opt.value;
+      sel.appendChild(opt);
+    }
+    $('loadIg').disabled = !state.packages.length;
+  } catch (e) {
+    setStatus('igStatus', 'err', 'Could not load packages.yaml: ' + e.message);
+  }
+  try {
+    const m = await loadYaml('maps.yaml');
+    state.maps = (m && m.maps) || [];
+    state.samples = (m && m.samples) || [];
+    const sel = $('mapSelect'); sel.innerHTML = '';
+    if (!state.maps.length) sel.innerHTML = '<option>(empty)</option>';
+    else for (const i in state.maps) {
+      const x = state.maps[i];
+      const opt = document.createElement('option');
+      opt.value = x.id;
+      opt.textContent = x.label || x.id;
+      opt.dataset.idx = i; // resolve `fml:` inline vs `url:` at fetch time
+      sel.appendChild(opt);
+    }
+    const ssel = $('sampleSelect');
+    for (const i in state.samples) {
+      const s = state.samples[i];
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.label || s.id;
+      opt.dataset.idx = i;
+      ssel.appendChild(opt);
+    }
+  } catch (e) {
+    setStatus('fmlStatus', 'err', 'Could not load maps.yaml: ' + e.message);
+  }
+}
+
+// ---- Setup section -------------------------------------------------------
+
+async function checkValidator() {
+  setStatus('validatorStatus', 'idle', 'Probing …');
+  try {
+    // /openapi.json accepts any method and always returns 200; /version is POST-only.
+    const v = await jsonFetch(baseUrl() + '/openapi.json');
+    const title = v && v.info && v.info.title ? v.info.title : 'FHIR Validator';
+    const ver   = v && v.info && v.info.version ? v.info.version : '';
+    // Reachable on the port isn't the same as ready: the /itb routes register late.
+    const ready = await validatorReady();
+    if (ready) {
+      setStatus('validatorStatus', 'ok', 'Ready: ' + title + (ver ? ' v' + ver : ''));
+      setPill('proxyPill', 'ok', 'validator ready');
+    } else {
+      setStatus('validatorStatus', 'warn', 'Reachable but still loading: ' + title + (ver ? ' v' + ver : '') + ' — gitb /itb routes not up yet, Load IG/Register would 404. Wait a moment and re-check.');
+      setPill('proxyPill', 'warn', 'validator starting');
+    }
+  } catch (e) {
+    setStatus('validatorStatus', 'err', e.message);
+    setPill('proxyPill', 'err', 'validator unreachable');
+  }
+}
+
+async function checkJar() {
+  setStatus('jarStatus', 'idle', 'Checking …');
+  try {
+    const j = await jsonFetch(baseUrl() + '/__local/jar');
+    if (j.exists) setStatus('jarStatus', 'ok', 'Present: ' + j.path + ' (' + j.sizeMB + ' MB)');
+    else          setStatus('jarStatus', 'warn', 'Not present yet. Click Download to fetch it.');
+  } catch (e) {
+    setStatus('jarStatus', 'err', 'Could not reach cors-proxy at ' + baseUrl()
+      + '. Start it with `node cors-proxy.js`. ' + e.message);
+  }
+}
+
+async function downloadJar() {
+  const url = $('jarUrl').value.trim();
+  if (!url) return setStatus('jarStatus', 'err', 'Provide a jar URL first.');
+  setStatus('jarStatus', 'idle', 'Downloading …');
+  try {
+    const j = await jsonFetch(baseUrl() + '/__local/jar?url=' + encodeURIComponent(url),
+      { method: 'POST' });
+    if (j.skipped) setStatus('jarStatus', 'ok', 'Already present: ' + j.path + ' (' + j.sizeMB + ' MB)');
+    else if (j.downloaded) setStatus('jarStatus', 'ok', 'Downloaded to ' + j.path + ' (' + j.sizeMB + ' MB)');
+    else setStatus('jarStatus', 'warn', JSON.stringify(j));
+  } catch (e) {
+    setStatus('jarStatus', 'err', e.message);
+  }
+}
+
+// ---- Start / restart the validator process ------------------------------
+// The proxy owns the validator process lifecycle. "Start" spawns it; "Restart"
+// kills it and spawns a fresh one — the validator never replaces a canonical
+// already in context, so a restart is the reliable way to make an edited map/IG
+// take effect. After either, we poll /openapi.json until the server rebinds
+// (cold start loads the core package and can take 30-90s).
+
+// /openapi.json answers the moment the HTTP server binds, but the gitb /itb/*
+// processing routes (parse, loadIG, transform, loadResource, package) only
+// register once the core package finishes loading. Probe one of those with a
+// trivial parse so we never report "ready" while Load IG / Register would still
+// 404 against a half-started validator.
+async function validatorReady() {
+  try {
+    const r = await fetch(baseUrl() + '/itb/transform/process', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation: 'parse', input: [
+        { name: 'content', value: 'map "http://example.org/StructureMap/ReadyProbe" = "ReadyProbe"', embeddingMethod: 'STRING' },
+        { name: 'name', value: 'ReadyProbe', embeddingMethod: 'STRING' }
+      ] })
+    });
+    return r.ok;   // 200 = gitb layer live; 404 = routes not registered yet
+  } catch (_) {
+    return false;  // connection refused / still binding
+  }
+}
+
+async function waitForValidator(timeoutMs) {
+  const deadline = Date.now() + (timeoutMs || 180000);
+  while (Date.now() < deadline) {
+    if (await validatorReady()) return true;
+    await new Promise((res) => setTimeout(res, 1500));
+  }
+  return false;
+}
+
+async function startValidatorProc() {
+  setStatus('validatorStatus', 'idle', 'Starting validator …');
+  setPill('proxyPill', '', 'starting validator');
+  try {
+    const j = await jsonFetch(baseUrl() + '/__local/validator/start', { method: 'POST' });
+    setStatus('validatorStatus', 'idle', 'Launched (pid ' + j.pid + ', FHIR ' + j.version + '). Waiting for it to bind on ' + j.port + ' …');
+    const ok = await waitForValidator();
+    if (ok) await checkValidator();
+    else setStatus('validatorStatus', 'warn', 'Started but not answering yet — it may still be loading the core package. Click Check shortly.');
+  } catch (e) {
+    setStatus('validatorStatus', 'err', 'Start failed: ' + e.message);
+  }
+}
+
+async function restartValidatorProc() {
+  setStatus('validatorStatus', 'idle', 'Restarting validator (clearing context) …');
+  setPill('proxyPill', '', 'restarting validator');
+  try {
+    const j = await jsonFetch(baseUrl() + '/__local/validator/restart', { method: 'POST' });
+    setStatus('validatorStatus', 'idle', 'Restarted (pid ' + j.pid + ', FHIR ' + j.version + '). Context cleared. Waiting for it to bind …');
+    const ok = await waitForValidator();
+    if (ok) {
+      await checkValidator();
+      setStatus('validatorStatus', 'ok', 'Validator restarted — context is empty. Re-load your IG (step 1) and re-register the map (step 3).');
+    } else {
+      setStatus('validatorStatus', 'warn', 'Restarted but not answering yet — still loading the core package. Click Check shortly.');
+    }
+  } catch (e) {
+    setStatus('validatorStatus', 'err', 'Restart failed: ' + e.message);
+  }
+}
+
+// ---- Step 1 — Load IG ----------------------------------------------------
+
+async function loadIg() {
+  const ig = $('igSelect').value;
+  if (!ig) return;
+  setStatus('igStatus', 'idle', 'Loading ' + ig + ' …');
+  try {
+    const resp = await gitbProcess('igManager', 'loadIG', [gitbInput('ig', ig)]);
+    const loaded = gitbOutput(resp, 'loaded');
+    setStatus('igStatus', 'ok', 'Loaded: ' + (loaded || ig));
+  } catch (e) {
+    setStatus('igStatus', 'err', e.message);
+  }
+}
+
+// ---- Step 2 — Fetch + parse FML -----------------------------------------
+
+async function fetchFml() {
+  const sel = $('mapSelect');
+  const opt = sel.options[sel.selectedIndex];
+  const entry = opt ? state.maps[opt.dataset.idx] : null;
+  if (!entry) return setStatus('fmlStatus', 'warn', 'No map selected.');
+  // Prefer inline `fml:`; fall back to `url:`.
+  if (entry.fml) {
+    $('fmlText').value = entry.fml;
+    setStatus('fmlStatus', 'ok', 'Loaded inline. Click Parse to convert to a StructureMap.');
+    $('parseFml').disabled = false;
+    return;
+  }
+  if (!entry.url) return setStatus('fmlStatus', 'warn', 'Selected map has neither `fml:` nor `url:` — paste FML manually.');
+  setStatus('fmlStatus', 'idle', 'Fetching ' + entry.url + ' …');
+  try {
+    // Route via cors-proxy /__local/fetch for hosts without permissive CORS.
+    const r = await fetch(viaProxyFetch(entry.url));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    $('fmlText').value = await r.text();
+    setStatus('fmlStatus', 'ok', 'Fetched. Click Parse to convert to a StructureMap.');
+    $('parseFml').disabled = false;
+  } catch (e) {
+    setStatus('fmlStatus', 'err', 'Fetch failed: ' + e.message);
+  }
+}
+
+async function parseFml() {
+  const fml = $('fmlText').value;
+  if (!fml.trim()) return setStatus('fmlStatus', 'warn', 'FML is empty.');
+  setStatus('fmlStatus', 'idle', 'Parsing …');
+  try {
+    const resp = await gitbProcess('transform', 'parse', [
+      gitbInput('content', fml),
+      gitbInput('name', $('mapSelect').value || 'map')
+    ]);
+    const sm = gitbOutput(resp, 'structureMap');
+    if (!sm) throw new Error('No structureMap in response');
+    state.smJson = sm;
+    let parsed; try { parsed = JSON.parse(sm); } catch (_) { parsed = null; }
+    state.smUrl = parsed && parsed.url ? parsed.url : null;
+    $('smJson').value = parsed ? JSON.stringify(parsed, null, 2) : sm;
+    if (state.smUrl) {
+      setPill('smUrlPill', 'ok', state.smUrl);
+      $('mapUrl').value = state.smUrl;
+    } else {
+      setPill('smUrlPill', 'err', 'no url');
+    }
+    setStatus('fmlStatus', 'ok', 'Parsed.' + (state.smUrl ? ' Canonical: ' + state.smUrl : ''));
+    $('registerSm').disabled = false;
+    $('detectSds').disabled = false;
+    detectStructures();   // populate the SD list from the freshly parsed map
+    $('runTransform').disabled = !$('mapUrl').value;
+  } catch (e) {
+    setStatus('fmlStatus', 'err', e.message);
+  }
+}
+
+// ---- StructureDefinitions used by the map -------------------------------
+// A StructureMap declares the types it reads/writes in `structure[]` (one per
+// FML `uses` line). Those are canonical urls, not download locations, so we try
+// to fetch each from its url (content-negotiating FHIR JSON via the proxy). What
+// resolves is loaded into the validator and folded into the $package bundle as a
+// dependency; what doesn't is assumed to come from an IG loaded in step 1.
+
+function renderSdList() {
+  const ul = $('sdList');
+  ul.innerHTML = '';
+  if (!state.structures.length) {
+    ul.innerHTML = '<li class="help">No StructureDefinitions detected yet — parse a map first.</li>';
+    return;
+  }
+  for (const s of state.structures) {
+    const kind = s.status === 'fetched' ? 'ok' : s.status === 'fetching' ? '' : s.status === 'unresolved' ? 'warn' : '';
+    const li = document.createElement('li');
+    li.style.margin = '3px 0';
+    li.innerHTML = '<span class="mono">' + s.url + '</span> <span class="pill ' + kind + '">' + s.statusText + '</span>';
+    ul.appendChild(li);
+  }
+}
+
+function detectStructures() {
+  state.structures = [];
+  if (!state.smJson) { renderSdList(); $('resolveSds').disabled = true; return; }
+  let sm; try { sm = JSON.parse(state.smJson); } catch (_) { renderSdList(); return; }
+  const urls = Array.from(new Set((sm.structure || []).map((s) => s.url).filter(Boolean)));
+  state.structures = urls.map((u) => ({ url: u, status: 'pending', statusText: 'not resolved', json: null }));
+  $('resolveSds').disabled = state.structures.length === 0;
+  renderSdList();
+}
+
+async function resolveStructures() {
+  for (const s of state.structures) {
+    if (s.status === 'fetched') continue;
+    s.status = 'fetching'; s.statusText = 'fetching …'; renderSdList();
+    try {
+      const r = await fetch(viaProxyFetch(s.url), { headers: { 'Accept': 'application/fhir+json' } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      let obj; try { obj = JSON.parse(await r.text()); } catch (_) { obj = null; }
+      if (obj && obj.resourceType === 'StructureDefinition') {
+        s.json = JSON.stringify(obj); s.status = 'fetched'; s.statusText = 'fetched — will load';
+      } else {
+        s.status = 'unresolved'; s.statusText = 'no StructureDefinition at url — relying on loaded IG';
+      }
+    } catch (e) {
+      s.status = 'unresolved'; s.statusText = 'unresolved (' + e.message + ') — relying on loaded IG';
+    }
+    renderSdList();
+  }
+  return state.structures.filter((s) => s.status === 'fetched').length;
+}
+
+// ---- Step 3 — Register on validator -------------------------------------
+
+async function registerSm() {
+  if (!state.smJson) return setStatus('regStatus', 'err', 'Parse a map first.');
+  const mode = document.querySelector('input[name=regMode]:checked').value;
+  setStatus('regStatus', 'idle', mode === 'package' ? 'Packaging dependencies + loading …' : 'Loading StructureMap directly …');
+  try {
+    // Resolve + load the StructureDefinitions the map uses, before the map itself.
+    // In $package mode this puts them in context so $package folds them into the
+    // bundle as dependencies; in direct mode it makes the types available too.
+    if (state.structures.some((s) => s.status === 'pending')) await resolveStructures();
+    const sds = state.structures.filter((s) => s.status === 'fetched' && s.json);
+    for (const s of sds) {
+      await gitbProcess('loadResource', 'loadResource', [gitbInput('content', s.json)]);
+    }
+    let payload = state.smJson;
+    if (mode === 'package') {
+      // Need the SM in context first so packageResource can find it. Push the SM,
+      // then ask for its $package, then push the resulting bundle.
+      await gitbProcess('loadResource', 'loadResource', [gitbInput('content', state.smJson)]);
+      if (!state.smUrl) throw new Error('Parsed StructureMap has no url; cannot $package');
+      const includeRules = $('includeRuleRefs').checked ? 'true' : 'false';
+      const pkgResp = await gitbProcess('package', 'package', [
+        gitbInput('resource', state.smUrl),
+        gitbInput('includeRuleReferences', includeRules)
+      ]);
+      payload = gitbOutput(pkgResp, 'bundle');
+      if (!payload) throw new Error('$package returned no bundle');
+    }
+    const resp = await gitbProcess('loadResource', 'loadResource', [gitbInput('content', payload)]);
+    const count = gitbOutput(resp, 'loaded');
+    const list  = gitbOutput(resp, 'resources');
+    setStatus('regStatus', 'ok', 'Registered ' + count + ' resource' + (count === '1' ? '' : 's') + (list ? ': ' + list : ''));
+    $('regDump').textContent = JSON.stringify(resp, null, 2);
+    $('runTransform').disabled = !$('mapUrl').value;
+  } catch (e) {
+    setStatus('regStatus', 'err', e.message);
+  }
+}
+
+// ---- Step 4 — Transform -------------------------------------------------
+
+async function fetchSample() {
+  const sel = $('sampleSelect');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || opt.value === '__editor__') return;
+  const entry = state.samples[opt.dataset.idx];
+  if (!entry) return;
+  // Prefer inline `json:`; fall back to `url:`.
+  if (entry.json) {
+    $('inputJson').value = typeof entry.json === 'string' ? entry.json : JSON.stringify(entry.json, null, 2);
+    return;
+  }
+  if (!entry.url) return;
+  try {
+    const r = await fetch(viaProxyFetch(entry.url));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    $('inputJson').value = await r.text();
+  } catch (e) {
+    setStatus('transformStatus', 'err', 'Sample fetch failed: ' + e.message);
+  }
+}
+
+async function runTransform() {
+  const content = $('inputJson').value;
+  const map = $('mapUrl').value.trim();
+  if (!content.trim()) return setStatus('transformStatus', 'warn', 'Input JSON is empty.');
+  if (!map) return setStatus('transformStatus', 'warn', 'Map URL is empty.');
+  setStatus('transformStatus', 'idle', 'Transforming …');
+  try {
+    const resp = await gitbProcess('transform', 'transform', [
+      gitbInput('content', content),
+      gitbInput('map', map),
+      gitbInput('contentType', 'application/fhir+json')
+    ]);
+    const result = gitbOutput(resp, 'result');
+    if (result == null) throw new Error('No result in response');
+    let pretty; try { pretty = JSON.stringify(JSON.parse(result), null, 2); } catch (_) { pretty = result; }
+    $('outputJson').value = pretty;
+    setStatus('transformStatus', 'ok', 'Done.');
+  } catch (e) {
+    setStatus('transformStatus', 'err', e.message);
+    $('outputJson').value = '';
+  }
+}
+
+// ---- Wire-up -------------------------------------------------------------
+
+$('checkValidator').addEventListener('click', checkValidator);
+$('startValidator').addEventListener('click', startValidatorProc);
+$('restartValidator').addEventListener('click', restartValidatorProc);
+$('checkJar')      .addEventListener('click', checkJar);
+$('downloadJar')   .addEventListener('click', downloadJar);
+$('loadIg')        .addEventListener('click', loadIg);
+$('fetchFml')      .addEventListener('click', fetchFml);
+$('parseFml')      .addEventListener('click', parseFml);
+$('registerSm')    .addEventListener('click', registerSm);
+$('detectSds')     .addEventListener('click', detectStructures);
+$('resolveSds')    .addEventListener('click', resolveStructures);
+$('fetchSample')   .addEventListener('click', fetchSample);
+$('runTransform')  .addEventListener('click', runTransform);
+$('mapUrl')        .addEventListener('input', () => {
+  $('runTransform').disabled = !$('mapUrl').value;
+});
+
+// ---- Validator log tail (SSE) -------------------------------------------
+let logSource = null;
+function startLogTail() {
+  stopLogTail();
+  const name = $('logFile').value;
+  const view = $('logView');
+  setPill('logState', 'ok', 'tailing ' + name);
+  logSource = new EventSource(baseUrl() + '/__local/tail?name=' + encodeURIComponent(name));
+  logSource.onmessage = (e) => {
+    view.appendChild(document.createTextNode(e.data + '\n'));
+    view.scrollTop = view.scrollHeight;
+  };
+  logSource.addEventListener('meta', (e) => {
+    const meta = document.createElement('span');
+    meta.style.color = '#7aa6cf';
+    meta.textContent = '--- ' + e.data + '\n';
+    view.appendChild(meta);
+    view.scrollTop = view.scrollHeight;
+  });
+  logSource.onerror = () => { setPill('logState', 'err', 'reconnecting…'); };
+  logSource.onopen  = () => { setPill('logState', 'ok', 'tailing ' + name); };
+}
+function stopLogTail() {
+  if (logSource) { logSource.close(); logSource = null; }
+  setPill('logState', '', 'idle');
+}
+$('logPanel').addEventListener('toggle', (e) => {
+  if (e.target.open) startLogTail(); else stopLogTail();
+});
+$('logFile').addEventListener('change', () => { if ($('logPanel').open) startLogTail(); });
+$('clearLog').addEventListener('click', () => { $('logView').textContent = ''; });
+
+initConfig();
+// Probe automatically on load so the user sees instant status.
+checkValidator();
+checkJar();
+</script>
+</body>
+</html>

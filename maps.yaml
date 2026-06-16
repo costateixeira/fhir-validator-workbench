@@ -1,0 +1,132 @@
+# FML maps available to the transform workbench.
+#
+# Each entry is either:
+#   url: <absolute http(s) URL>      — fetched via cors-proxy /__local/fetch
+#   fml: |                            — inline FML text (YAML literal block)
+#     map "..."
+#     ...
+#
+# The SPA prefers `fml:` over `url:` when both are present.
+# Edit freely; the SPA refetches this file on every load.
+#
+# Engine limitation worth knowing about:
+#   FML patterns of the form `src.X -> tgt.X;` (where X is a primitive like `id`)
+#   trigger an implicit `create()` for the target primitive, which the engine
+#   cannot resolve when running outside a fully provisioned context. Prefer
+#   literal-assignment patterns (`src -> tgt.X = '…';`) or variable-binding
+#   patterns (`src.X as v -> tgt.X = v;`) for demos.
+
+maps:
+  - id: stamp-gender
+    label: "Stamp Patient.gender = 'unknown' (literal assignment)"
+    description: "Smallest-possible working transform: writes a literal into the target. No primitive create()."
+    fml: |
+      map "http://example.org/StructureMap/StampGender" = "StampGender"
+
+      uses "http://hl7.org/fhir/StructureDefinition/Patient" alias PatientSrc as source
+      uses "http://hl7.org/fhir/StructureDefinition/Patient" alias PatientTgt as target
+
+      group StampGender(source src : PatientSrc, target tgt : PatientTgt) {
+        src -> tgt.gender = 'unknown' "stamp-gender";
+      }
+
+  - id: gender-and-status
+    label: "Stamp gender + active flag"
+    description: "Two literal assignments in a single group."
+    fml: |
+      map "http://example.org/StructureMap/StampGenderAndActive" = "StampGenderAndActive"
+
+      uses "http://hl7.org/fhir/StructureDefinition/Patient" alias PatientSrc as source
+      uses "http://hl7.org/fhir/StructureDefinition/Patient" alias PatientTgt as target
+
+      group StampGenderAndActive(source src : PatientSrc, target tgt : PatientTgt) {
+        src -> tgt.gender = 'other' "g";
+        src -> tgt.active = true   "a";
+      }
+
+  - id: identity-limited
+    label: "Identity (Patient -> Patient) — known engine limitation"
+    description: "Demonstrates the `src.id -> tgt.id;` pattern. Parse+register work; the engine errors at execute time on primitive create()."
+    fml: |
+      map "http://example.org/StructureMap/IdentityTest" = "IdentityTest"
+
+      uses "http://hl7.org/fhir/StructureDefinition/Patient" alias PatientSrc as source
+      uses "http://hl7.org/fhir/StructureDefinition/Patient" alias PatientTgt as target
+
+      group IdentityTest(source src : PatientSrc, target tgt : PatientTgt) {
+        src.id -> tgt.id;
+      }
+
+  # WHO SMART ICVP maps (https://smart.who.int/icvp/). To use these, first load
+  # `smart.who.int.icvp#current` from packages.yaml in step 1 — once the IG is
+  # loaded, the maps below resolve their referenced StructureDefinitions.
+  # Filenames in the IG source repo follow `input/maps/<Name>.map`.
+
+  - id: icvp-qr-to-claim
+    label: "ICVP: QR → ICVPClaim"
+    description: "WHO smart-icvp top-level map: QuestionnaireResponse → ICVPClaim."
+    url: "https://raw.githubusercontent.com/WorldHealthOrganization/smart-icvp/main/input/maps/ICVPQRtoICVPClaim.map"
+
+  - id: icvp-claim-to-ips
+    label: "ICVP: ICVPClaim → IPS"
+    description: "WHO smart-icvp top-level map: ICVPClaim → IPS."
+    url: "https://raw.githubusercontent.com/WorldHealthOrganization/smart-icvp/main/input/maps/ICVPClaimtoIPS.map"
+
+  # WHO SMART PH4H maps (https://smart.who.int/ph4h/). To use these, first load
+  # `smart.who.int.ph4h#current` from packages.yaml in step 1 so the engine can
+  # resolve all referenced StructureDefinitions (MedicationOverviewMin, MedicationOverviewLM,
+  # MedicationTreatmentLineMin, etc.).
+  # Filenames follow `input/maps/<Name>.map` in the IG source repo.
+
+  - id: ph4h-min-to-lm
+    label: "PH4H: MedicationOverviewMin → MedicationOverviewLM"
+    description: "WHO smart-ph4h stage-1 map: compact QR payload (MedicationOverviewMin) → IHE MEOW intermediate logical model (MedicationOverviewLM). Maps patient demographics and up to 3 medication treatment lines."
+    url: "https://raw.githubusercontent.com/WorldHealthOrganization/smart-ph4h/MeOW/input/maps/MedicationOverviewMin-to-IHE-MedicationOverviewLM.map"
+
+  - id: ph4h-lm-to-bundle
+    label: "PH4H: MedicationOverviewLM → MedicationOverview Bundle"
+    description: "WHO smart-ph4h stage-2 map: IHE MEOW logical model (MedicationOverviewLM) → FHIR Bundle document (Composition + Patient + MedicationStatement entries)."
+    url: "https://raw.githubusercontent.com/WorldHealthOrganization/smart-ph4h/MeOW/input/maps/MedicationOverviewLM-to-MedicationOverviewBundle.map"
+
+  - id: ph4h-min-to-bundle
+    label: "PH4H: MedicationOverviewMin → MedicationOverview Bundle (chained)"
+    description: "WHO smart-ph4h chained map: MedicationOverviewMin → MedicationOverview Bundle in one step, via an intermediate MedicationOverviewLM created with create(). Composes ph4h-min-to-lm and ph4h-lm-to-bundle. Note: engine must support intermediate scratch variables via create()."
+    url: "https://raw.githubusercontent.com/WorldHealthOrganization/smart-ph4h/MeOW/input/maps/MedicationOverviewMin-to-MedicationOverviewBundle.map"
+
+# Sample JSON inputs you can pick in the transform step.
+samples:
+  - id: patient-minimal
+    label: "Patient (minimal, inline)"
+    json: |
+      {"resourceType":"Patient","id":"abc","name":[{"family":"Smith","given":["John"]}]}
+
+  - id: patient-empty
+    label: "Patient (just resourceType)"
+    json: |
+      {"resourceType":"Patient"}
+
+  - id: medication-overview-min
+    label: "MedicationOverviewMin (Martha DeLarosa, 2 lines)"
+    description: "PH4H compact QR payload: patient Martha DeLarosa with two medication treatment lines. Use with ph4h-min-to-lm or ph4h-min-to-bundle maps."
+    json: |
+      {
+        "resourceType": "MedicationOverviewMin",
+        "n": "Martha DeLarosa",
+        "dob": "1972-05-01",
+        "s": "female",
+        "id": "574687583",
+        "m": [
+          {
+            "m": "L02BG03",
+            "es": "2015-03-01",
+            "da": "2015-03-15",
+            "d": "1 tablet once daily",
+            "r": "treatment for breast cancer"
+          },
+          {
+            "m": "G02CX04",
+            "es": "2016-01-01",
+            "d": "as directed"
+          }
+        ]
+      }

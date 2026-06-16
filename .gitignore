@@ -1,0 +1,11 @@
+# FHIR validator binary — downloaded on demand by start-workbench.ps1, not versioned
+validator_cli.jar
+*.jar
+
+# Validator runtime logs (tailed live by cors-proxy)
+validator.out.log
+validator.err.log
+*.log
+
+# Node deps (cors-proxy uses only Node built-ins; nothing to vendor)
+node_modules/
