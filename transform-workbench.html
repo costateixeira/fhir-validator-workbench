@@ -591,14 +591,24 @@ async function registerSm() {
     // bundle as dependencies; in direct mode it makes the types available too.
     if (state.structures.some((s) => s.status === 'pending')) await resolveStructures();
     const sds = state.structures.filter((s) => s.status === 'fetched' && s.json);
+    // Authoring loop: every Register click overwrites whatever is already in
+    // context under the same canonical URL. No need to bump StructureMap.version
+    // on each iteration. Implemented server-side via the loadResource `replace`
+    // input (see GitbLoadResourceHandler / ValidationEngine.registerIfNew).
     for (const s of sds) {
-      await gitbProcess('loadResource', 'loadResource', [gitbInput('content', s.json)]);
+      await gitbProcess('loadResource', 'loadResource', [
+        gitbInput('content', s.json),
+        gitbInput('replace', 'true'),
+      ]);
     }
     let payload = state.smJson;
     if (mode === 'package') {
       // Need the SM in context first so packageResource can find it. Push the SM,
       // then ask for its $package, then push the resulting bundle.
-      await gitbProcess('loadResource', 'loadResource', [gitbInput('content', state.smJson)]);
+      await gitbProcess('loadResource', 'loadResource', [
+        gitbInput('content', state.smJson),
+        gitbInput('replace', 'true'),
+      ]);
       if (!state.smUrl) throw new Error('Parsed StructureMap has no url; cannot $package');
       const includeRules = $('includeRuleRefs').checked ? 'true' : 'false';
       const pkgResp = await gitbProcess('package', 'package', [
@@ -608,7 +618,10 @@ async function registerSm() {
       payload = gitbOutput(pkgResp, 'bundle');
       if (!payload) throw new Error('$package returned no bundle');
     }
-    const resp = await gitbProcess('loadResource', 'loadResource', [gitbInput('content', payload)]);
+    const resp = await gitbProcess('loadResource', 'loadResource', [
+      gitbInput('content', payload),
+      gitbInput('replace', 'true'),
+    ]);
     const count = gitbOutput(resp, 'loaded');
     const list  = gitbOutput(resp, 'resources');
     setStatus('regStatus', 'ok', 'Registered ' + count + ' resource' + (count === '1' ? '' : 's') + (list ? ': ' + list : ''));
