@@ -61,7 +61,7 @@ param(
   [string] $JarUrl        = 'https://github.com/costateixeira/org.hl7.fhir.core/releases/download/wip/validator_cli.jar',
   [int]    $ProxyPort     = 8090,
   [int]    $ValidatorPort = 8089,
-  [string] $FhirVersion   = '4.0',
+  [string] $FhirVersion   = '5.0',
   [switch] $SkipDownload,
   [switch] $SkipValidator,
   [switch] $SkipProxy,

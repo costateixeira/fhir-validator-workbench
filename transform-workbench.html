@@ -80,6 +80,7 @@
     </div>
     <button id="checkValidator">Check</button>
     <button id="startValidator">Start</button>
+    <button id="stopValidator" title="Asks the validator to shut down via POST /stop. The JVM exits; the cors-proxy stays up.">Stop</button>
     <button id="restartValidator" title="Stops the validator and starts a fresh one — clears all loaded IGs/resources from context">Restart (clear context)</button>
   </div>
   <div id="validatorStatus" class="status idle">Click <b>Check</b> to probe the validator.</div>
@@ -433,6 +434,21 @@ async function startValidatorProc() {
   }
 }
 
+async function stopValidatorProc() {
+  setStatus('validatorStatus', 'idle', 'Stopping validator …');
+  setPill('proxyPill', '', 'stopping validator');
+  try {
+    // Hit the validator's own /stop endpoint via the cors-proxy passthrough.
+    // The JVM exits before flushing the response on some platforms; treat
+    // network errors after the request as "stopped" rather than failure.
+    await fetch(baseUrl() + '/stop', { method: 'POST' }).catch(() => {});
+  } catch (_) { /* ignore — JVM exits mid-response */ }
+  // Give the OS a moment to release the port, then re-probe.
+  await new Promise((r) => setTimeout(r, 500));
+  await checkValidator();
+  setStatus('validatorStatus', 'warn', 'Validator stopped. Click Start to launch a new one.');
+}
+
 async function restartValidatorProc() {
   setStatus('validatorStatus', 'idle', 'Restarting validator (clearing context) …');
   setPill('proxyPill', '', 'restarting validator');
@@ -682,6 +698,7 @@ async function runTransform() {
 
 $('checkValidator').addEventListener('click', checkValidator);
 $('startValidator').addEventListener('click', startValidatorProc);
+$('stopValidator').addEventListener('click', stopValidatorProc);
 $('restartValidator').addEventListener('click', restartValidatorProc);
 $('checkJar')      .addEventListener('click', checkJar);
 $('downloadJar')   .addEventListener('click', downloadJar);
