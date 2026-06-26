@@ -30,7 +30,7 @@
   to forward to 127.0.0.1:8089, so change both sides if you change this.)
 
 .PARAMETER FhirVersion
-  -version flag passed to the validator. Default 4.0.
+  -version flag passed to the validator. Default 4.0.1 (R4).
 
 .PARAMETER SkipDownload
   Don't try to download; insist the jar is already in -JarDir.
@@ -49,8 +49,9 @@
   # First run: downloads jar, starts validator + proxy, opens the page.
 
 .EXAMPLE
-  .\start-workbench.ps1 -JarDir D:\fhir\bin -FhirVersion 5.0
-  # Stash jar in D:\fhir\bin and run the validator in R5 mode.
+  .\start-workbench.ps1 -JarDir D:\fhir\bin
+  # Stash jar in D:\fhir\bin; the validator runs R4 (4.0.1) by default.
+  # (Pass -FhirVersion only if you deliberately want a different release.)
 
 .EXAMPLE
   .\start-workbench.ps1 -SkipValidator -SkipDownload
@@ -61,7 +62,7 @@ param(
   [string] $JarUrl        = 'https://github.com/costateixeira/org.hl7.fhir.core/releases/download/wip/validator_cli.jar',
   [int]    $ProxyPort     = 8090,
   [int]    $ValidatorPort = 8089,
-  [string] $FhirVersion   = '5.0',
+  [string] $FhirVersion   = '4.0.1',
   [switch] $SkipDownload,
   [switch] $SkipValidator,
   [switch] $SkipProxy,
@@ -123,6 +124,19 @@ if (-not $SkipValidator) {
   Write-Host "Starting validator on port $ValidatorPort (FHIR $FhirVersion) ..." -ForegroundColor Cyan
   $validatorOut = Join-Path $JarDir 'validator.out.log'
   $validatorErr = Join-Path $JarDir 'validator.err.log'
+  # Free the validator port first so we always replace any stale validator
+  # (e.g. one left running on a different FHIR version). Without this the new
+  # java can't bind the port, exits, and the OLD validator keeps serving — which
+  # is how a previous R5 run can survive a "restart" and look like the script
+  # started R5.
+  $stale = Get-NetTCPConnection -LocalPort $ValidatorPort -State Listen -ErrorAction SilentlyContinue
+  if ($stale) {
+    $stale | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object {
+      Write-Host "  Port $ValidatorPort already in use by PID $_ - stopping it." -ForegroundColor Yellow
+      Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 700
+  }
   # Hidden window + redirected stdout/stderr so a crash doesn't take the
   # diagnostic with it. NoNewWindow=false isn't enough since the console
   # closes the moment java exits.
@@ -180,6 +194,18 @@ if (-not $SkipValidator) {
 $proxyProc = $null
 if (-not $SkipProxy) {
   Need 'node' "Install Node.js (https://nodejs.org) and put 'node' on PATH (or run with -SkipProxy)."
+  # Free the proxy port too. A stale proxy can carry an old FHIR_VERSION (e.g. 5.0)
+  # in its environment, and its in-page Start/Restart button would then keep
+  # relaunching the validator as R5. Killing it ensures the fresh proxy below
+  # carries this run's -FhirVersion ($FhirVersion).
+  $staleProxy = Get-NetTCPConnection -LocalPort $ProxyPort -State Listen -ErrorAction SilentlyContinue
+  if ($staleProxy) {
+    $staleProxy | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object {
+      Write-Host "  Port $ProxyPort already in use by PID $_ - stopping it." -ForegroundColor Yellow
+      Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 500
+  }
   Write-Host "Starting cors-proxy on port $ProxyPort (JAR_DIR=$JarDir) ..." -ForegroundColor Cyan
   # Start-Process -Environment is PS 7+ only. On 5.1 we set the env vars in this
   # session, spawn the child (which inherits them), then restore. JAR_DIR tells the

@@ -81,17 +81,17 @@ maps:
   - id: ph4h-min-to-lm
     label: "PH4H: MedicationOverviewMin → MedicationOverviewLM"
     description: "WHO smart-ph4h stage-1 map: compact QR payload (MedicationOverviewMin) → IHE MEOW intermediate logical model (MedicationOverviewLM). Maps patient demographics and up to 3 medication treatment lines."
-    url: "https://raw.githubusercontent.com/WorldHealthOrganization/smart-ph4h/MeOW/input/maps/MedicationOverviewMin-to-IHE-MedicationOverviewLM.map"
+    url: "https://raw.githubusercontent.com/WorldHealthOrganization/smart-ph4h/MeOW-r4/input/maps/MedicationOverviewMin-to-IHE-MedicationOverviewLM.map"
 
   - id: ph4h-lm-to-bundle
     label: "PH4H: MedicationOverviewLM → MedicationOverview Bundle"
     description: "WHO smart-ph4h stage-2 map: IHE MEOW logical model (MedicationOverviewLM) → FHIR Bundle document (Composition + Patient + MedicationStatement entries)."
-    url: "https://raw.githubusercontent.com/WorldHealthOrganization/smart-ph4h/MeOW/input/maps/MedicationOverviewLM-to-MedicationOverviewBundle.map"
+    url: "https://raw.githubusercontent.com/WorldHealthOrganization/smart-ph4h/MeOW-r4/input/maps/MedicationOverviewLM-to-MedicationOverviewBundle.map"
 
   - id: ph4h-min-to-bundle
     label: "PH4H: MedicationOverviewMin → MedicationOverview Bundle (chained)"
     description: "WHO smart-ph4h chained map: MedicationOverviewMin → MedicationOverview Bundle in one step, via an intermediate MedicationOverviewLM created with create(). Composes ph4h-min-to-lm and ph4h-lm-to-bundle. Note: engine must support intermediate scratch variables via create()."
-    url: "https://raw.githubusercontent.com/WorldHealthOrganization/smart-ph4h/MeOW/input/maps/MedicationOverviewMin-to-MedicationOverviewBundle.map"
+    url: "https://raw.githubusercontent.com/WorldHealthOrganization/smart-ph4h/MeOW-r4/input/maps/MedicationOverviewMin-to-MedicationOverviewBundle.map"
 
 # Sample JSON inputs you can pick in the transform step.
 samples:

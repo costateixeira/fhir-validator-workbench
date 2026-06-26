@@ -22,7 +22,7 @@ const VALIDATOR_PORT   = 8089;
 const JAR_FILENAME     = 'validator_cli.jar';
 // FHIR version passed to `validator_cli.jar server`. start-workbench.ps1 forwards
 // its -FhirVersion here so a workbench-driven restart uses the same version.
-const FHIR_VERSION     = process.env.FHIR_VERSION || '4.0';
+const FHIR_VERSION     = process.env.FHIR_VERSION || '4.0.1';
 
 // Handle to a validator we spawned ourselves (null if none / it exited). Used so
 // a restart can kill the previous one cleanly before rebinding the port.

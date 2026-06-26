@@ -32,5 +32,12 @@ packages:
     version: "0.3.0"
     label: "WHO SMART ICVP 0.3.0"
 
-  - id: "C:/Users/ritik/Documents/WHO/GitHub/smart-ph4h/output/package.tgz"
+  # smart-ph4h depends on this (sushi-config: ihe.pharm.meow: dev). `dev` is a
+  # local-only cache slot (~/.fhir/packages/ihe.pharm.meow#dev) — not fetchable
+  # from a registry — so list it explicitly. Load it BEFORE smart-ph4h.
+  - id: ihe.pharm.meow
+    version: "dev"
+    label: "IHE Pharm MEOW (dev / r4 branch build)"
+
+  - id: "E:/work/ImplementationGuides/smart-ph4h/output/package.tgz"
     label: "smart-ph4h (local build)"
